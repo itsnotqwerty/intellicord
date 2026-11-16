@@ -29,6 +29,8 @@
 .cm-launcher[aria-expanded="true"] { color: var(--cm-text); background: var(--cm-brand); }
 .cm-panel { position: absolute; left: 0; bottom: 48px; width: min(400px, calc(100vw - 28px)); max-height: calc(100dvh - 86px); display: flex; flex-direction: column; background: var(--cm-bg); border: 1px solid var(--cm-border); border-radius: 8px; box-shadow: 0 8px 32px #0006; overflow: hidden; }
 .cm-panel[hidden] { display: none; }
+.cm-call-picker { margin: 0 16px 10px; min-width: 0; max-width: calc(100% - 32px); padding: 6px 8px; border: 1px solid var(--cm-border); border-radius: 4px; background: var(--cm-input); color: var(--cm-text); font: inherit; }
+.cm-call-picker[hidden] { display: none; }
 .cm-panel > :not(.cm-list) { flex-shrink: 0; }
 .cm-header { display: flex; align-items: center; gap: 4px; padding: 12px 12px 8px 16px; }
 .cm-header h2 { font-size: 16px; line-height: 24px; font-weight: 700; margin: 0; flex: 1; }

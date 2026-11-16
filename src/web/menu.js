@@ -1,5 +1,5 @@
 import { createElement, History, X, Copy, Check, Trash2, ArrowDownLeft, ArrowUpRight, Search, Volume2, Users, Download } from "lucide";
-import { activityUsers, filterActivity, formatTextLog } from "./activity.js";
+import { activityUsers, filterActivity, formatMarkdownLog } from "./activity.js";
 import { callPlacement } from "./placement.js";
 import { profilePicture } from "./avatars.js";
 import css from "./menu.css";
@@ -37,7 +37,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   panel.setAttribute("aria-label", "Voice history");
   const header = element("header", "cm-header");
   const heading = element("h2", "", "Voice history");
-  const download = iconButton(Download, "Export matching activity to text log");
+  const download = iconButton(Download, "Export matching activity as Markdown");
   const clear = iconButton(Trash2, "Clear history");
   const close = iconButton(X, "Close history");
   header.append(heading, download, clear, close);
@@ -47,6 +47,8 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   channelRow.append(createElement(Volume2, { width: 18, height: 18 }), channelName,
     createElement(Users, { width: 15, height: 15 }), count);
   const session = element("div", "cm-session", "This session · 0 events");
+  const callPicker = element("select", "cm-call-picker");
+  callPicker.setAttribute("aria-label", "Call history");
   const searchWrap = element("div", "cm-search");
   const search = element("input");
   search.type = "search";
@@ -79,12 +81,13 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   list.setAttribute("role", "list");
   const status = element("div", "cm-status", "Connecting");
   status.setAttribute("role", "status");
-  panel.append(header, channelRow, session, searchWrap, filters, list, status);
+  panel.append(header, callPicker, channelRow, session, searchWrap, filters, list, status);
   root.append(style, panel, launcher);
   document.body.append(root);
   let state = { channel: null, participants: {}, events: [] };
   let mode = "all";
   let selectedUsers = null;
+  let selectedArchiveId = null;
   let restoreFocus = null;
   let confirmClear = false;
   let live = false;
@@ -95,14 +98,23 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   const copyTimers = new Set();
   const downloads = new Map();
 
+  function selectedArchive() {
+    return (state.archives || []).find(archive => String(archive.id) === selectedArchiveId);
+  }
+
+  function viewedEvents() {
+    return selectedArchive()?.events ?? state.events;
+  }
+
   function matchingEvents() {
-    return filterActivity(state.events, { query: search.value, action: mode, userIds: selectedUsers });
+    return filterActivity(viewedEvents(), { query: search.value, action: mode, userIds: selectedUsers });
   }
 
   function renderUsers() {
     const focusedId = userOptions.contains(document.activeElement) ? document.activeElement.dataset.userId : null;
     const scrollTop = userOptions.scrollTop;
-    const users = activityUsers(state.events, state.participants);
+    const archive = selectedArchive();
+    const users = activityUsers(viewedEvents(), archive ? {} : state.participants);
     const selectedCount = users.filter(user => selectedUsers === null || selectedUsers.has(user.id)).length;
     allUsers.checked = users.length > 0 && selectedCount === users.length;
     allUsers.indeterminate = selectedCount > 0 && selectedCount < users.length;
@@ -132,7 +144,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
       label.title = `${user.display_name} · @${user.username} · ${user.id}`;
       choice.append(checkbox, details);
       label.append(choice);
-      bindUserContextMenu(label, user);
+      bindUserContextMenu(label, user, archive?.channel.id);
       userOptions.append(label);
     }
     if (!userOptions.children.length) userOptions.append(element("div", "cm-user-none", "No matching users"));
@@ -175,12 +187,28 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   function render() {
     const focusedCopyId = list.contains(document.activeElement) ? document.activeElement.dataset.copyId : null;
     const scrollTop = list.scrollTop;
-    channelName.textContent = state.channel?.name || "Not in a voice call";
+    const archive = selectedArchive();
+    const call = archive ?? state.current_call;
+    const historyEvents = viewedEvents();
+    callPicker.replaceChildren();
+    const current = element("option", "", state.channel ? "Current call" : "Last call");
+    current.value = "";
+    current.selected = selectedArchiveId === null;
+    callPicker.append(current);
+    for (const archived of [...(state.archives || [])].reverse()) {
+      const option = element("option", "", `${archived.channel.name} · ${new Date(archived.started_at).toLocaleString()}`);
+      option.value = String(archived.id);
+      option.selected = String(archived.id) === selectedArchiveId;
+      callPicker.append(option);
+    }
+    callPicker.hidden = !(state.archives || []).length;
+    channelName.textContent = call?.channel.name || state.channel?.name || "Not in a voice call";
+    count.hidden = Boolean(archive);
     count.textContent = String(Object.keys(state.participants).length);
     count.title = `${count.textContent} participants`;
     const matches = matchingEvents();
-    session.textContent = `This session · ${state.events.length} events${matches.length === state.events.length ? "" : ` · ${matches.length} shown`}`;
-    clear.disabled = state.events.length === 0;
+    session.textContent = `${archive ? "Archived call" : "This call"} · ${historyEvents.length} events${matches.length === historyEvents.length ? "" : ` · ${matches.length} shown`}`;
+    clear.disabled = Boolean(archive) || state.events.length === 0;
     download.disabled = matches.length === 0;
     for (const [key, button] of filterButtons) button.setAttribute("aria-pressed", String(mode === key));
     renderUsers();
@@ -189,7 +217,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     if (!events.length) {
       const empty = element("div", "cm-empty");
       empty.append(createElement(History, { width: 28, height: 28 }),
-        element("strong", "", state.events.length ? "No matching events" : "No activity yet"));
+        element("strong", "", historyEvents.length ? "No matching events" : "No activity yet"));
       list.append(empty);
     }
     for (const event of events) {
@@ -282,6 +310,13 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     userMenu.style.maxHeight = `${Math.max(60, available)}px`;
   }
 
+  callPicker.addEventListener("change", () => {
+    selectedArchiveId = callPicker.value || null;
+    selectedUsers = null;
+    resetClear();
+    openUserPicker(false);
+    render();
+  });
   userFilter.addEventListener("click", () => openUserPicker(userMenu.hidden));
   userSearch.addEventListener("input", renderUsers);
   allUsers.addEventListener("change", () => {
@@ -293,17 +328,17 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     if (!events.length) return;
     try {
       const now = Date.now();
-      const url = URL.createObjectURL(new Blob([formatTextLog(events, now)], { type: "text/plain;charset=utf-8" }));
+      const url = URL.createObjectURL(new Blob([formatMarkdownLog(events, now, selectedArchive() ?? state.current_call)], { type: "text/markdown;charset=utf-8" }));
       const link = element("a");
       link.href = url;
-      link.download = `callmon-voice-activity-${new Date(now).toISOString().replace(/[:.]/g, "-")}.txt`;
+      link.download = `callmon-voice-activity-${new Date(now).toISOString().replace(/[:.]/g, "-")}.md`;
       root.append(link);
       link.click();
       link.remove();
       const timer = setTimeout(() => { URL.revokeObjectURL(url); downloads.delete(url); }, 60000);
       downloads.set(url, timer);
-      status.textContent = `Text log prepared · ${events.length} events`;
-    } catch { status.textContent = "Unable to prepare text log"; }
+      status.textContent = `Markdown log prepared · ${events.length} events`;
+    } catch { status.textContent = "Unable to prepare Markdown log"; }
   });
 
   for (const [key, label] of [["all", "All"], ["joined", "Joined"], ["left", "Left"]]) {
@@ -317,6 +352,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   close.addEventListener("click", () => open(false));
   search.addEventListener("input", render);
   clear.addEventListener("click", () => {
+    if (selectedArchive()) return;
     if (confirmClear) { send(JSON.stringify({ kind: "clear" })); resetClear(); }
     else {
       confirmClear = true;
@@ -367,8 +403,15 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   render();
   return {
     update(value) {
+      const newCall = value.current_call?.id !== state.current_call?.id;
       state = value;
-      if (!state.events.length) { selectedUsers = null; openUserPicker(false); }
+      if (newCall || selectedArchiveId && !selectedArchive()) {
+        selectedArchiveId = null;
+        selectedUsers = null;
+        resetClear();
+        openUserPicker(false);
+      }
+      if (!viewedEvents().length) { selectedUsers = null; openUserPicker(false); }
       render(); refreshStatus();
     },
     connection(value) { live = value; refreshStatus(); },

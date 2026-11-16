@@ -35,6 +35,113 @@ test("history rows and user choices open context menus without mute buttons or c
   } finally { menu.dispose(); }
 });
 
+test("export downloads only matching events as a Markdown file", async () => {
+  const { window, document } = parseHTML("<html><body></body></html>");
+  globalThis.window = window;
+  globalThis.document = document;
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  let blob;
+  let filename;
+  URL.createObjectURL = value => { blob = value; return "blob:markdown-test"; };
+  URL.revokeObjectURL = () => {};
+  document.addEventListener("click", event => {
+    if (event.target.tagName === "A") { filename = event.target.download; event.preventDefault(); }
+  });
+  const user = { id: "9007199254740993", username: "morgan", display_name: "Morgan" };
+  const channel = { id: "100", name: "General" };
+  const menu = mountMenu(() => {});
+  try {
+    const download = document.querySelector('[aria-label="Export matching activity as Markdown"]');
+    assert.equal(download.disabled, true);
+    menu.update({ channel, participants: {}, events: [
+      { sequence: 1, user, channel, timestamp: 1000, action: "joined" },
+      { sequence: 2, user: { ...user, id: "2", username: "other", display_name: "Other" }, channel, timestamp: 2000, action: "left" },
+    ] });
+    const search = document.querySelector('[aria-label="Search history"]');
+    search.value = "morgan";
+    search.dispatchEvent(new window.Event("input"));
+    download.click();
+    assert.match(filename, /^callmon-voice-activity-.*\.md$/);
+    assert.equal(blob.type, "text/markdown;charset=utf-8");
+    const markdown = await blob.text();
+    assert.ok(markdown.startsWith("# Callmon Voice Activity\n"));
+    assert.ok(markdown.includes("Events: 1"));
+    assert.ok(markdown.includes(user.id));
+    assert.ok(!markdown.includes("Other"));
+    search.value = "no matching user";
+    search.dispatchEvent(new window.Event("input"));
+    assert.equal(download.disabled, true);
+  } finally {
+    menu.dispose();
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
+  }
+});
+
+test("archives are browsable, read-only, and isolated from the current call", async () => {
+  const { window, document } = parseHTML("<html><body></body></html>");
+  globalThis.window = window;
+  globalThis.document = document;
+  const sent = [];
+  const opened = [];
+  const originalCreate = URL.createObjectURL;
+  const originalRevoke = URL.revokeObjectURL;
+  let blob;
+  URL.createObjectURL = value => { blob = value; return "blob:archive-test"; };
+  URL.revokeObjectURL = () => {};
+  const oldUser = { id: "9007199254740993", username: "old_user", display_name: "Old User" };
+  const currentUser = { id: "2", username: "current_user", display_name: "Current User" };
+  const oldChannel = { id: "100", name: "Old call" };
+  const channel = { id: "200", name: "New call" };
+  const archive = { id: 1, channel: oldChannel, started_at: 1000, ended_at: 3000,
+    events: [{ sequence: 1, user: oldUser, channel: oldChannel, timestamp: 2000, action: "joined" }] };
+  const state = { channel, current_call: { id: 2, channel, started_at: 4000, ended_at: null },
+    participants: { [currentUser.id]: currentUser }, events: [], archives: [archive] };
+  const menu = mountMenu(payload => sent.push(payload), { open: (event, ...args) => opened.push(args) });
+  try {
+    menu.update(state);
+    const picker = document.querySelector('[aria-label="Call history"]');
+    assert.equal(picker.hidden, false);
+    assert.equal(document.querySelectorAll(".cm-event").length, 0);
+    assert.equal(document.querySelectorAll(".cm-user-option").length, 1);
+    function select(id) {
+      for (const option of picker.children) option.selected = option.value === id;
+      picker.dispatchEvent(new window.Event("change"));
+    }
+    select("1");
+    assert.match(document.querySelector(".cm-session").textContent, /Archived call/);
+    assert.equal(document.querySelector(".cm-event .cm-name").textContent, "Old User");
+    assert.equal(document.querySelectorAll(".cm-user-option").length, 1);
+    document.querySelector(".cm-user-option").dispatchEvent(new window.Event("contextmenu", { cancelable: true }));
+    assert.deepEqual(opened[0], [oldUser.id, oldChannel.id]);
+    const clear = document.querySelector('[aria-label="Clear history"]');
+    assert.equal(clear.disabled, true);
+    clear.click();
+    clear.click();
+    assert.deepEqual(sent, []);
+    document.querySelector('[aria-label="Export matching activity as Markdown"]').click();
+    const markdown = await blob.text();
+    assert.ok(markdown.includes("Call: Old call (100)"));
+    assert.ok(markdown.includes("Ended: 1970-01-01T00:00:03.000Z"));
+    assert.ok(markdown.includes(oldUser.id));
+    assert.ok(!markdown.includes("Current User"));
+    menu.update({ ...state, events: [{ sequence: 2, user: currentUser, channel, timestamp: 5000, action: "joined" }] });
+    assert.equal(document.querySelector(".cm-event .cm-name").textContent, "Old User");
+    menu.update({ ...state, current_call: { ...state.current_call, id: 3 }, archives: [archive] });
+    assert.match(document.querySelector(".cm-session").textContent, /This call/);
+    assert.equal(document.querySelectorAll(".cm-event").length, 0);
+    select("1");
+    menu.update({ ...state, current_call: { ...state.current_call, id: 3 }, archives: [] });
+    assert.equal(picker.hidden, true);
+    assert.match(document.querySelector(".cm-session").textContent, /This call/);
+  } finally {
+    menu.dispose();
+    URL.createObjectURL = originalCreate;
+    URL.revokeObjectURL = originalRevoke;
+  }
+});
+
 test("unsupported native context menus fail visibly while leaving history usable", () => {
   const { window, document } = parseHTML("<html><body></body></html>");
   globalThis.window = window;

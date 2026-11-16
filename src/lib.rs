@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, VecDeque};
 use serde::{Deserialize, Serialize};
 
 pub const HISTORY_LIMIT: usize = 500;
+pub const ARCHIVE_LIMIT: usize = 20;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct User {
@@ -45,13 +46,32 @@ pub struct Event {
     pub channel: Channel,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CallInfo {
+    pub id: u64,
+    pub channel: Channel,
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CallArchive {
+    #[serde(flatten)]
+    pub call: CallInfo,
+    pub events: VecDeque<Event>,
+}
+
 #[derive(Default, Debug, Serialize)]
 pub struct History {
     pub channel: Option<Channel>,
     pub participants: BTreeMap<String, User>,
     pub events: VecDeque<Event>,
+    pub current_call: Option<CallInfo>,
+    pub archives: VecDeque<CallArchive>,
     #[serde(skip)]
     sequence: u64,
+    #[serde(skip)]
+    call_sequence: u64,
 }
 
 impl History {
@@ -71,7 +91,33 @@ impl History {
                     .collect();
                 let same_channel = self.channel.as_ref().map(|value| &value.id)
                     == channel.as_ref().map(|value| &value.id);
+                if !same_channel {
+                    if let Some(channel) = &channel {
+                        if let Some(mut call) = self.current_call.take() {
+                            call.ended_at.get_or_insert(timestamp);
+                            self.archives.push_back(CallArchive {
+                                call,
+                                events: std::mem::take(&mut self.events),
+                            });
+                            if self.archives.len() > ARCHIVE_LIMIT {
+                                self.archives.pop_front();
+                            }
+                        }
+                        self.call_sequence += 1;
+                        self.current_call = Some(CallInfo {
+                            id: self.call_sequence,
+                            channel: channel.clone(),
+                            started_at: timestamp,
+                            ended_at: None,
+                        });
+                    } else if let Some(call) = &mut self.current_call {
+                        call.ended_at.get_or_insert(timestamp);
+                    }
+                }
                 if same_channel && let Some(channel) = &channel {
+                    if let Some(call) = &mut self.current_call {
+                        call.channel = channel.clone();
+                    }
                     let mut changes = Vec::new();
                     for (id, user) in &self.participants {
                         if !participants.contains_key(id) {
@@ -103,9 +149,26 @@ impl History {
                     BTreeMap::new()
                 };
                 self.channel = channel;
+                self.trim_events();
             }
         }
         Ok(())
+    }
+
+    fn trim_events(&mut self) {
+        let total = self.events.len()
+            + self
+                .archives
+                .iter()
+                .map(|archive| archive.events.len())
+                .sum::<usize>();
+        let mut excess = total.saturating_sub(HISTORY_LIMIT);
+        for archive in &mut self.archives {
+            let remove = excess.min(archive.events.len());
+            archive.events.drain(..remove);
+            excess -= remove;
+        }
+        self.events.drain(..excess);
     }
 }
 
@@ -191,6 +254,83 @@ mod tests {
         assert_eq!(history.events[1].action, Action::Left);
         assert_eq!(history.events[1].user.id, "9007199254740993");
         assert_eq!(history.events[1].timestamp, 3);
+    }
+
+    #[test]
+    fn joining_a_new_call_archives_previous_events_and_establishes_a_baseline() {
+        let mut history = History::default();
+        history.apply(snapshot(Some("100"), &["1"]), 1).unwrap();
+        history
+            .apply(snapshot(Some("100"), &["1", "9007199254740993"]), 2)
+            .unwrap();
+        history.apply(snapshot(Some("200"), &["3"]), 3).unwrap();
+        assert!(history.events.is_empty());
+        assert_eq!(history.archives.len(), 1);
+        let archive = &history.archives[0];
+        assert_eq!(archive.call.channel.id, "100");
+        assert_eq!(archive.call.started_at, 1);
+        assert_eq!(archive.call.ended_at, Some(3));
+        assert_eq!(archive.events[0].user.id, "9007199254740993");
+        assert_eq!(archive.events[0].action, Action::Joined);
+        assert_eq!(history.current_call.as_ref().unwrap().id, 2);
+        assert!(history.participants.contains_key("3"));
+        history.apply(snapshot(Some("200"), &[]), 4).unwrap();
+        assert_eq!(history.events[0].action, Action::Left);
+        history.apply(Command::Clear, 5).unwrap();
+        assert!(history.events.is_empty());
+        assert_eq!(history.archives[0].events.len(), 1);
+    }
+
+    #[test]
+    fn disconnect_retains_history_until_rejoining_even_the_same_channel() {
+        let mut history = History::default();
+        history.apply(snapshot(Some("100"), &[]), 1).unwrap();
+        history.apply(snapshot(Some("100"), &["1"]), 2).unwrap();
+        history.apply(snapshot(None, &[]), 3).unwrap();
+        history.apply(snapshot(None, &[]), 4).unwrap();
+        assert_eq!(history.events.len(), 1);
+        assert!(history.archives.is_empty());
+        assert_eq!(history.current_call.as_ref().unwrap().ended_at, Some(3));
+        assert!(history.apply(snapshot(Some("invalid"), &[]), 5).is_err());
+        assert!(history.archives.is_empty());
+        history.apply(snapshot(Some("100"), &["2"]), 6).unwrap();
+        assert!(history.events.is_empty());
+        assert_eq!(history.archives[0].call.ended_at, Some(3));
+        assert_eq!(history.archives[0].events.len(), 1);
+        assert_eq!(history.current_call.as_ref().unwrap().started_at, 6);
+    }
+
+    #[test]
+    fn archives_and_total_retained_events_are_bounded() {
+        let mut history = History::default();
+        for channel in 1..=25 {
+            history
+                .apply(snapshot(Some(&channel.to_string()), &[]), channel * 100)
+                .unwrap();
+            for offset in 1..=30 {
+                let ids = if offset % 2 == 0 { vec![] } else { vec!["1"] };
+                history
+                    .apply(
+                        snapshot(Some(&channel.to_string()), &ids),
+                        channel * 100 + offset,
+                    )
+                    .unwrap();
+            }
+        }
+        assert_eq!(history.archives.len(), ARCHIVE_LIMIT);
+        assert_eq!(
+            history.events.len()
+                + history
+                    .archives
+                    .iter()
+                    .map(|archive| archive.events.len())
+                    .sum::<usize>(),
+            HISTORY_LIMIT
+        );
+        assert_eq!(history.archives.back().unwrap().call.channel.id, "24");
+        let value = serde_json::to_value(&history).unwrap();
+        assert_eq!(value["archives"][19]["channel"]["id"], "24");
+        assert_eq!(value["current_call"]["channel"]["id"], "25");
     }
 
     #[test]
