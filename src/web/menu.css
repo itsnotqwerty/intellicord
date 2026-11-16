@@ -14,7 +14,7 @@
   letter-spacing: 0;
   position: fixed;
   inset: auto auto 14px 14px;
-  z-index: 10000;
+  z-index: 1001;
 }
 .cm-root *, .cm-root *::before, .cm-root *::after { box-sizing: border-box; }
 .cm-root[hidden] { display: none; }

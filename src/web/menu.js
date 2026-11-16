@@ -90,6 +90,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   let live = false;
   let error = null;
   let userContextActive = false;
+  let userContextPending = null;
   const filterButtons = new Map();
   const copyTimers = new Set();
   const downloads = new Map();
@@ -145,11 +146,25 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     function show(event) {
       event.preventDefault();
       event.stopPropagation();
+      function failed(cause) {
+        userContextActive = false;
+        userContextPending = null;
+        status.textContent = cause.message || "Unable to open Discord user context menu";
+      }
       try {
         if (!userContextMenu?.open) throw new Error("Discord user context menu unavailable");
-        userContextMenu.open(event, user.id, channelId);
         userContextActive = true;
-      } catch (cause) { status.textContent = cause.message || "Unable to open Discord user context menu"; }
+        const opened = userContextMenu.open(event, user.id, channelId);
+        status.textContent = "";
+        if (opened?.then) {
+          userContextPending = opened;
+          opened.then(() => {
+            if (userContextPending === opened) userContextPending = null;
+          }, cause => {
+            if (userContextPending === opened) failed(cause);
+          });
+        }
+      } catch (cause) { failed(cause); }
     }
     node.addEventListener("contextmenu", show);
     node.addEventListener("keydown", event => {
@@ -311,7 +326,10 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     }
   });
   function keyboard(event) {
-    if (userContextActive && document.querySelector('[role="menu"]')) return;
+    if (userContextActive) {
+      if (userContextPending || document.querySelector('[role="menu"]')) return;
+      if (event.key === "Escape") { userContextActive = false; return; }
+    }
     if (event.key === "Escape" && !panel.hidden) {
       event.stopPropagation();
       if (!userMenu.hidden) { openUserPicker(false); userFilter.focus(); }
@@ -320,8 +338,14 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   }
   function outside(event) {
     if (userContextActive) {
-      if (document.querySelector('[role="menu"]')) return;
+      if (userContextPending) return;
+      const nativeMenu = document.querySelector('[role="menu"]');
+      if (nativeMenu) {
+        if (!nativeMenu.contains(event.target) && !root.contains(event.target)) userContextActive = false;
+        return;
+      }
       userContextActive = false;
+      if (!root.contains(event.target)) return;
     }
     if (!panel.hidden && !root.contains(event.target)) open(false);
     else if (!userMenu.hidden && !searchWrap.contains(event.target)) openUserPicker(false);

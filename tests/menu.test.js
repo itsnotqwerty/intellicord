@@ -50,6 +50,51 @@ test("unsupported native context menus fail visibly while leaving history usable
   } finally { menu.dispose(); }
 });
 
+test("asynchronous native menu failures are visible and leave history usable", async () => {
+  const { window, document } = parseHTML("<html><body></body></html>");
+  globalThis.window = window;
+  globalThis.document = document;
+  const user = { id: "1", username: "morgan", display_name: "Morgan" };
+  const channel = { id: "100", name: "General" };
+  const menu = mountMenu(() => {}, { open: async () => { throw new Error("Chunk download failed"); } });
+  try {
+    menu.update({ channel, participants: {}, events: [{ sequence: 1, user, channel, timestamp: 1000, action: "left" }] });
+    document.querySelector(".cm-event").dispatchEvent(new window.Event("contextmenu", { cancelable: true }));
+    await Promise.resolve();
+    assert.equal(document.querySelector(".cm-status").textContent, "Chunk download failed");
+    assert.equal(document.querySelectorAll(".cm-event").length, 1);
+  } finally { menu.dispose(); }
+});
+
+test("lazy native menus protect history during loading and after early dismissal", async () => {
+  const { window, document } = parseHTML('<html><body><button id="outside">Outside</button></body></html>');
+  globalThis.window = window;
+  globalThis.document = document;
+  const user = { id: "1", username: "morgan", display_name: "Morgan" };
+  const channel = { id: "100", name: "General" };
+  let finishOpening;
+  const pending = new Promise(resolve => { finishOpening = resolve; });
+  const menu = mountMenu(() => {}, { open: () => pending });
+  try {
+    menu.update({ channel, participants: {}, events: [{ sequence: 1, user, channel, timestamp: 1000, action: "joined" }] });
+    document.querySelector(".cm-launcher").click();
+    const panel = document.querySelector(".cm-panel");
+    const outside = document.querySelector("#outside");
+    document.querySelector(".cm-event").dispatchEvent(new window.Event("contextmenu", { bubbles: true, cancelable: true }));
+    outside.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+    assert.equal(panel.hidden, false);
+    outside.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+    assert.equal(panel.hidden, false);
+    finishOpening();
+    await pending;
+    await Promise.resolve();
+    outside.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+    assert.equal(panel.hidden, false);
+    outside.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+    assert.equal(panel.hidden, true);
+  } finally { finishOpening(); menu.dispose(); }
+});
+
 test("native user menu interactions and dismissal keep Callmon open", () => {
   const { window, document } = parseHTML('<html><body><button id="outside">Outside</button></body></html>');
   globalThis.window = window;

@@ -38,6 +38,72 @@ test("user context menus delegate exact users and channels to Discord's native c
   assert.throws(() => menu.open(event, user.id, channel.id), /unavailable on this build/);
 });
 
+test("cold-cache native menus load only the chunks from the matching Discord call site", async () => {
+  const { stores } = fixture();
+  const component = () => {};
+  let opened;
+  const opener = (event, render) => { opened = { event, element: render({ context: "APP" }) }; };
+  opener.toString = () => "currentTarget.contains renderLazy: preventDefault";
+  const loaded = [];
+  const runtime = id => {
+    assert.equal(id, 107632);
+    assert.deepEqual(loaded, [339715, 24312]);
+    return { [Symbol("rspack exports")]: { default: component } };
+  };
+  runtime.m = { 279154(native) {
+    return async () => {
+      const { default: menu } = await Promise.all([native.e(339715), native.e(24312)]).then(native.bind(native, 107632));
+      return { menu, onInteraction: "GuildChannelUserContextMenu" };
+    };
+  } };
+  runtime.c = { opener: { exports: { open: opener } }, jsx: { exports: { jsx: (type, props) => ({ type, props }) } } };
+  runtime.e = async id => { loaded.push(id); };
+  stores.runtime = runtime;
+  stores.channels.getChannel = id => ({ id, guild_id: "200" });
+  const target = {};
+  const event = { target, currentTarget: target, pageX: 12, pageY: 34, preventDefault() {}, stopPropagation() {} };
+  const pending = createUserContextMenu(stores).open(event, "9007199254740993", "100");
+  event.currentTarget = null;
+  await pending;
+  assert.equal(opened.event.currentTarget, target);
+  assert.equal(opened.event.pageX, 12);
+  assert.equal(opened.element.type, component);
+  assert.equal(opened.element.props.guildId, "200");
+  assert.equal(opened.element.props.user.id, "9007199254740993");
+  loaded.length = 0;
+  await createUserContextMenu(stores).open({ target, currentTarget: target }, "9007199254740993", "100");
+  assert.equal(opened.event.pageX, 0);
+  assert.equal(opened.event.pageY, 0);
+  stores.channels.getChannel = id => ({ id });
+  runtime.m.genericPanel = function(native) {
+    return async () => {
+      const { default: menu } = await Promise.all([native.e(924697)]).then(native.bind(native, 668569));
+      return { menu, onInteraction: "UserGenericContextMenu" };
+    };
+  };
+  const genericRuntime = id => {
+    assert.equal(id, 668569);
+    return { default: component };
+  };
+  Object.assign(genericRuntime, runtime);
+  loaded.length = 0;
+  stores.runtime = genericRuntime;
+  await createUserContextMenu(stores).open(event, "9007199254740993", "100");
+  assert.deepEqual(loaded, [924697]);
+  assert.equal(opened.element.props.guildId, undefined);
+  stores.runtime = runtime;
+  stores.channels.getChannel = id => ({ id, guild_id: "200" });
+  runtime.e = async () => { throw new Error("Chunk download failed"); };
+  await assert.rejects(createUserContextMenu(stores).open(event, "9007199254740993", "100"), /Chunk download failed/);
+  runtime.m = { unrelated: function(native) {
+    return async () => {
+      const { default: menu } = await Promise.all([native.e("unknown")]).then(native.bind(native, 107632));
+      return { menu, onInteraction: "GuildChannelUserContextMenu" };
+    };
+  } };
+  assert.throws(() => createUserContextMenu(stores).open(event, "9007199254740993", "100"), /unavailable on this build/);
+});
+
 function fixture() {
   let channelId = "100";
   let states = { one: { userId: "9007199254740993" } };

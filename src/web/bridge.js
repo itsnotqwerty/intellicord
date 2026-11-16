@@ -1,4 +1,6 @@
 import { safeAvatarUrl } from "./avatars.js";
+import { parse } from "acorn";
+import { simple } from "acorn-walk";
 
 export function sponsoredContentSection() {
   return document.querySelector('[data-nav-anchor-key="sponsored_content_category"]');
@@ -41,7 +43,7 @@ export function observeCallView(update) {
   function refresh() {
     const settingsOpen = [...document.querySelectorAll('[data-settings-sidebar-item]')].some(node => node.getClientRects().length);
     const view = settingsOpen ? null : [...document.querySelectorAll('[class*="callContainer_"], [data-intellicord-call-view]')]
-      .find(node => node.getClientRects().length && node.getBoundingClientRect().width > 0 && !node.closest('[hidden], [aria-hidden="true"]'));
+      .find(node => node.getClientRects().length && node.getBoundingClientRect().width > 0 && !node.closest('[hidden]'));
     if (view !== observedView) {
       sizes?.disconnect();
       if (view) sizes?.observe(view);
@@ -139,6 +141,52 @@ export function discoverClientStores(chunks) {
   throw new Error(errors.at(-1) || "Callmon: no Discord runtime was captured.");
 }
 
+function discoverLazyUserMenu(loader, interaction) {
+  for (const factory of Object.values(loader?.m || {})) {
+    const source = String(factory);
+    if (!source.includes(interaction)) continue;
+    try {
+      let tree;
+      try { tree = parse(`(${source})`, { ecmaVersion: "latest" }); }
+      catch { tree = parse(`({${source}})`, { ecmaVersion: "latest" }); }
+      let match;
+      simple(tree, {
+        ArrowFunctionExpression(node) {
+          if (!node.async) return;
+          let named = false;
+          let loading;
+          simple(node.body, {
+            Literal(value) { if (value.value === interaction) named = true; },
+            CallExpression(call) {
+              if (call.callee.type !== "MemberExpression" || call.callee.property.name !== "then") return;
+              const all = call.callee.object;
+              const binding = call.arguments[0];
+              if (all.type !== "CallExpression" || all.callee.type !== "MemberExpression" ||
+                  all.callee.object.name !== "Promise" || all.callee.property.name !== "all" ||
+                  all.arguments[0]?.type !== "ArrayExpression" || binding?.type !== "CallExpression" ||
+                  binding.callee.type !== "MemberExpression" || binding.callee.property.name !== "bind" ||
+                  binding.callee.object.type !== "Identifier" || binding.arguments[0]?.name !== binding.callee.object.name ||
+                  binding.arguments[1]?.type !== "Literal") return;
+              const moduleId = binding.arguments[1].value;
+              const runtimeName = binding.callee.object.name;
+              const chunks = all.arguments[0].elements;
+              if (!chunks.length || !chunks.every(chunk => chunk?.type === "CallExpression" &&
+                  chunk.callee.type === "MemberExpression" && chunk.callee.object.name === runtimeName &&
+                  chunk.callee.property.name === "e" && chunk.arguments.length === 1 &&
+                  chunk.arguments[0].type === "Literal" && Number.isSafeInteger(chunk.arguments[0].value))) return;
+              if (!Number.isSafeInteger(moduleId)) return;
+              loading = { moduleId, chunks: chunks.map(chunk => chunk.arguments[0].value) };
+            },
+          });
+          if (named && loading) match = loading;
+        },
+      });
+      if (match) return match;
+    } catch {}
+  }
+  return null;
+}
+
 export function createUserContextMenu(stores) {
   function exportsOf(module) {
     let exports = module?.exports;
@@ -153,9 +201,11 @@ export function createUserContextMenu(stores) {
       const user = stores.users.getUser(userId);
       const channel = stores.channels.getChannel(channelId || stores.selected.getVoiceChannelId());
       if (!user || !channel) throw new Error("Discord user or channel is no longer available");
+      const guildId = channel.getGuildId?.() ?? channel.guild_id;
+      const interaction = guildId ? "GuildChannelUserContextMenu" : "UserGenericContextMenu";
       const menuId = Object.keys(loader?.m || {}).find(id => {
         const source = String(loader.m[id]);
-        return source.includes('navId:"user-context"') && source.includes("GuildChannelUserContextMenu");
+        return source.includes('navId:"user-context"') && source.includes(interaction);
       });
       let opener;
       let jsx;
@@ -170,13 +220,24 @@ export function createUserContextMenu(stores) {
           }
         } catch {}
       }
-      if (!menuId || !opener || !jsx || typeof loader !== "function") throw new Error("Discord user context menu is unavailable on this build");
-      const component = exportsOf({ exports: loader(menuId) })?.default;
-      if (typeof component !== "function") throw new Error("Discord user context menu could not be loaded");
-      opener(event, props => jsx(component, {
-        ...props, user, channel, guildId: channel.getGuildId?.() ?? channel.guild_id,
-        showMediaItems: true, showChannelCallItems: true,
-      }));
+      if (!opener || !jsx || typeof loader !== "function") throw new Error("Discord user context menu is unavailable on this build");
+      const render = (id, menuEvent) => {
+        const component = exportsOf({ exports: loader(id) })?.default;
+        if (typeof component !== "function") throw new Error("Discord user context menu could not be loaded");
+        opener(menuEvent, props => jsx(component, {
+          ...props, user, channel, guildId,
+          showMediaItems: true, showChannelCallItems: true,
+        }));
+      };
+      if (menuId) return render(menuId, event);
+      const lazy = discoverLazyUserMenu(loader, interaction);
+      if (!lazy || typeof loader.e !== "function") throw new Error("Discord user context menu is unavailable on this build");
+      const menuEvent = {
+        target: event.target, currentTarget: event.currentTarget,
+        pageX: event.pageX ?? 0, pageY: event.pageY ?? 0,
+        preventDefault: () => event.preventDefault(), stopPropagation: () => event.stopPropagation(),
+      };
+      return Promise.all(lazy.chunks.map(id => loader.e(id))).then(() => render(lazy.moduleId, menuEvent));
     },
   };
 }
