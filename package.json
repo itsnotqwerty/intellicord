@@ -1,0 +1,16 @@
+{
+  "name": "intellicord-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/web/client.js src/web/preview.js --bundle --outdir=dist --format=iife --loader:.css=text",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "linkedom": "^0.18.15"
+  }
+}

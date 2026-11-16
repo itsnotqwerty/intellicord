@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Discord (Intellicord)
+StartupWMClass=discord
+Comment=Discord with automatic Intellicord attachment and Callmon voice history
+GenericName=Internet Messenger
+Exec=intellicord launch %u
+Icon=discord
+Type=Application
+Terminal=false
+Categories=Network;InstantMessaging;
+MimeType=x-scheme-handler/discord;
+X-Intellicord-Managed=true

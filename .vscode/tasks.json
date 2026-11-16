@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Intellicord: Attach to Discord",
+			"type": "shell",
+			"command": "cargo run -- inject --port 9222",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

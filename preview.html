@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intellicord - Callmon Preview</title>
+  <style>
+    :root { color-scheme: dark; font-family: "Noto Sans", sans-serif; color: #dbdee1; background: #313338; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; grid-template-columns: 72px 240px 1fr; }
+    .servers { background: #1e1f22; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+    .server { width: 44px; height: 44px; background: #5865f2; border-radius: 14px; display: grid; place-items: center; font-weight: 700; }
+    .sidebar { background: #2b2d31; }
+    .guild { padding: 16px; font-size: 15px; border-bottom: 1px solid #1e1f22; }
+    .category { color: #949ba4; font-size: 11px; padding: 24px 16px 8px; font-weight: 700; }
+    .channel { color: #949ba4; font-size: 14px; padding: 8px 16px; }
+    .selected { background: #404249; color: #f2f3f5; margin: 0 8px; padding: 8px; border-radius: 4px; }
+    main { min-width: 0; }
+    .topbar { height: 54px; display: flex; align-items: center; gap: 12px; padding: 16px; border-bottom: 1px solid #26272b; font-size: 14px; }
+    .badge { color: #949ba4; font-size: 11px; margin-left: auto; }
+    .call { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; padding: 52px 24px; background: #232428; }
+    .person { background: #36393f; border-radius: 6px; width: 160px; height: 130px; display: grid; place-content: center; text-align: center; gap: 12px; font-size: 13px; }
+    .avatar { border-radius: 50%; width: 48px; height: 48px; background: #4c5c72; margin: auto; display: grid; place-items: center; font-size: 17px; }
+    .person:nth-child(2) .avatar { background: #427b69; }
+    .person:nth-child(3) .avatar { background: #915968; }
+    .demo-controls { padding: 24px; display: flex; justify-content: flex-end; }
+    [hidden] { display: none !important; }
+    .preview-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; flex-shrink: 0; }
+    .preview-icon:hover { background: #404249; }
+    .preview-context-menu { position: fixed; z-index: 10001; width: 200px; padding: 6px; border-radius: 4px; background: #111214; box-shadow: 0 8px 24px #0006; }
+    .preview-context-menu button { display: block; width: 100%; min-height: 32px; padding: 6px 8px; text-align: left; font: inherit; font-size: 14px; color: #dbdee1; background: transparent; border: 0; border-radius: 3px; cursor: pointer; }
+    .preview-context-menu button:hover:not(:disabled), .preview-context-menu button:focus-visible { color: white; background: #4752c4; outline: none; }
+    .preview-context-menu button:disabled { opacity: .4; cursor: default; }
+    .preview-context-menu [aria-checked="true"]::after { content: "x"; float: right; }
+    .preview-privacy { max-width: 640px; margin: 0 auto; padding: 24px; }
+    .preview-privacy h1 { font-size: 24px; font-weight: 500; margin: 20px 0 32px; }
+    .preview-privacy h2 { font-size: 20px; font-weight: 500; }
+    .preview-native-setting { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 0; border-bottom: 1px solid #404249; font-size: 14px; }
+    .questCard_demo, .sponsoredCard_demo { max-width: 280px; border: 1px solid #404249; border-radius: 6px; margin: 16px 24px; padding: 16px; font-size: 13px; }
+    .demo-controls button { color: #dbdee1; background: #404249; border: 0; border-radius: 4px; padding: 8px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+    @media (max-width: 760px) { body { grid-template-columns: 56px 1fr; } .sidebar { display: none; } .servers { padding: 8px; } .server { width: 40px; height: 40px; } .call { gap: 10px; padding: 24px 12px; } .person { width: 110px; height: 100px; } }
+  </style>
+</head>
+<body>
+  <nav class="servers" aria-label="Servers"><div class="server">C</div></nav>
+  <aside class="sidebar"><div class="guild">Community</div><div class="category">TEXT CHANNELS</div><div class="channel"># general</div><div class="category">VOICE CHANNELS</div><div class="channel selected">General</div></aside>
+  <main data-intellicord-call-view><header class="topbar"><strong>General</strong><span class="badge">INTELLICORD / CALLMON · DEMO DATA</span><button id="preview-settings" class="preview-icon" type="button" aria-label="User Settings" title="User Settings"></button></header>
+    <div id="preview-call">
+    <div class="call"><div class="person"><div class="avatar">M</div>Morgan</div><div class="person"><div class="avatar">J</div>Jules</div><div class="person"><div class="avatar">A</div>Alex Chen</div></div>
+    <div class="demo-controls"><button id="simulate-join" type="button">Simulate join</button></div>
+    <aside class="questCard_demo" aria-label="Quest">Demo Quest</aside>
+    <aside class="sponsoredCard_demo" aria-label="Sponsored Content">Demo Sponsored Content</aside>
+    </div>
+    <section id="preview-privacy" class="preview-privacy" hidden>
+      <button id="preview-back" class="preview-icon" type="button" aria-label="Back to call" title="Back to call"></button>
+      <h1>Data &amp; Privacy</h1>
+      <div data-nav-anchor-key="sponsored_content_category">
+        <h2>Sponsored Content</h2>
+        <label class="preview-native-setting">Use my Discord activity to personalize Sponsored Content<input type="checkbox" checked></label>
+        <label class="preview-native-setting">Use third-party data to personalize Sponsored Content<input type="checkbox" checked></label>
+      </div>
+    </section>
+  </main>
+  <script src="dist/preview.js"></script>
+</body>
+</html>
