@@ -1,0 +1,22 @@
+[package]
+name = "intellicord-ebpf"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "intellicord-process"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+aya-ebpf = "0.1.1"
+intellicord-observe-common = { path = "../intellicord-observe-common" }
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1

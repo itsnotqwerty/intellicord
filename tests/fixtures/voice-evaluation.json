@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "dataset_version": "synthetic-voice-evaluation/0.1",
+  "cases": [
+    {
+      "name": "benign baseline",
+      "trace": "five baseline participants are not arrivals",
+      "rationale": "Existing members establish a baseline, not a burst.",
+      "positive_rules": [], "onset_ms": null, "expected_detected_rules": []
+    },
+    {
+      "name": "benign spaced arrivals",
+      "trace": "joins spaced more than ten seconds apart with reconciliation heartbeats",
+      "rationale": "Ordinary arrivals separated beyond the rule window.",
+      "positive_rules": [], "onset_ms": null, "expected_detected_rules": []
+    },
+    {
+      "name": "synthetic disruptive burst",
+      "trace": "five distinct arrivals trigger a join burst",
+      "rationale": "Author-labeled disruptive entry; intent is fixture metadata, not visible to the detector.",
+      "positive_rules": ["join_burst"], "onset_ms": 1000, "expected_detected_rules": ["join_burst"]
+    },
+    {
+      "name": "benign scheduled group arrival",
+      "trace": "five distinct arrivals trigger a join burst",
+      "rationale": "Same observable facts as disruptive burst, but a scheduled group arrival: a deliberate false positive.",
+      "positive_rules": [], "onset_ms": null, "expected_detected_rules": ["join_burst"]
+    },
+    {
+      "name": "synthetic disruptive reentry",
+      "trace": "three leave return pairs trigger rapid reentry",
+      "rationale": "Author-labeled disruptive cycling; the rule sees only transitions.",
+      "positive_rules": ["rapid_reentry"], "onset_ms": 1000, "expected_detected_rules": ["rapid_reentry"]
+    },
+    {
+      "name": "benign unstable reconnect loop",
+      "trace": "three leave return pairs trigger rapid reentry",
+      "rationale": "Same observable timings as disruptive cycling, but benign reconnection: a deliberate false positive.",
+      "positive_rules": [], "onset_ms": null, "expected_detected_rules": ["rapid_reentry"]
+    },
+    {
+      "name": "capture interruption suppresses burst inference",
+      "trace": "five distinct arrivals trigger a join burst",
+      "rationale": "Disruptive fixture label remains positive, but a known capture gap correctly suppresses inference, yielding a measured miss.",
+      "positive_rules": ["join_burst"], "onset_ms": 1000, "expected_detected_rules": [],
+      "capture_gap_steps": [5]
+    },
+    {
+      "name": "burst with deterministic receipt jitter",
+      "trace": "five distinct arrivals trigger a join burst",
+      "rationale": "Alternating receipt offsets preserve order and remain well inside the ten-second window; not an independent sample.",
+      "positive_rules": ["join_burst"], "onset_ms": 1000, "expected_detected_rules": ["join_burst"],
+      "timing_offsets_ms": [0, 0, 125, -125, 125, -125]
+    },
+    {
+      "name": "reentry with deterministic receipt jitter",
+      "trace": "three leave return pairs trigger rapid reentry",
+      "rationale": "Receipt jitter changes measured latency without changing the three leave-return pairs; not an independent sample.",
+      "positive_rules": ["rapid_reentry"], "onset_ms": 1000, "expected_detected_rules": ["rapid_reentry"],
+      "timing_offsets_ms": [0, 0, 125, -125, 125, -125, 125]
+    },
+    {
+      "name": "delayed receipt suppresses burst inference",
+      "trace": "five distinct arrivals trigger a join burst",
+      "rationale": "A seven-second receipt interval leaves intermediate coverage unknown; safe suppression yields a labeled miss.",
+      "positive_rules": ["join_burst"], "onset_ms": 1000, "expected_detected_rules": [],
+      "timing_offsets_ms": [0, 0, 0, 0, 0, 6000]
+    }
+  ]
+}

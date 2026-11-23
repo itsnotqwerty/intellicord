@@ -1,0 +1,69 @@
+name: BPF Build And Offline Inspection
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-and-inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Build embedded client
+        run: npm ci && npm run build
+      - name: Install explicit Rust toolchains
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup default 1.99.1
+          rustup toolchain install nightly-2026-10-15 --profile minimal --component rust-src
+      - name: Install checksum-pinned BPF linker
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/bpf-linker.tar.zst"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            https://github.com/aya-rs/bpf-linker/releases/download/v0.13.0/bpf-linker-x86_64-unknown-linux-musl.tar.zst \
+            --output "$archive"
+          printf '0e9b2b30f68898177f1cb6f0ecbfa909a82479473a49a0ef66529fd088e3e410  %s\n' "$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bpf-tools"
+          tar --extract --file "$archive" --directory "$RUNNER_TEMP/bpf-tools" --no-same-owner
+          printf '%s\n' "$RUNNER_TEMP/bpf-tools" >> "$GITHUB_PATH"
+      - name: Test build orchestration
+        run: node --max-old-space-size=256 --test tests/ebpf-build.test.js
+      - name: Test shared acoustic session integration
+        run: cargo test --locked --features observe --test acoustic-ingestion --test acoustic-injection
+      - name: Test sensor contracts and offline gates
+        run: |
+          cargo test --locked --features observe --lib observe::
+          cargo test --locked --features observe --test observe-contract --test observe-reservation --test observe-object --test observe-target --test observe-cli --test observe-socket-cli --test observe-supervisor --test observe-timed --test observe-progress --test socket-progress --test platform-cli
+      - name: Compile BPF and inspect exact output
+        shell: bash
+        run: bash scripts/build-ebpf.sh > bpf-object-metadata.json
+      - name: Test compiled instruction inventory without loading
+        env:
+          INTELLICORD_TEST_BPF_OBJECT: crates/intellicord-ebpf/target/bpfel-unknown-none/release/intellicord-process
+        run: |
+          cargo test --locked --features observe --test observe-object real_bpf_artifact_has_expected_instruction_inventory -- --ignored --exact
+          cargo test --locked --features observe --lib observe::verification::tests::real_bpf_artifact_exercises_load_outcomes_without_syscalls -- --ignored --exact
+      - name: Preserve build-only artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-sensor-build-only
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            crates/intellicord-ebpf/target/bpfel-unknown-none/release/intellicord-process
+            bpf-object-metadata.json

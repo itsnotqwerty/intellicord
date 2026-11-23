@@ -1,7 +1,10 @@
-import { createElement, History, X, Copy, Check, Trash2, ArrowDownLeft, ArrowUpRight, Search, Volume2, Users, Download } from "lucide";
+import { createElement, History, X, Info, Radio, FileText, Trash2, ArrowDownLeft, ArrowUpRight, Search, Volume2, Users, Download, ShieldAlert } from "lucide";
 import { activityUsers, filterActivity, formatMarkdownLog } from "./activity.js";
 import { callPlacement } from "./placement.js";
 import { profilePicture } from "./avatars.js";
+import { mountCallDetails } from "./call-details.js";
+import { mountIntelligenceReview } from "./intelligence.js";
+import { createCallDigest } from "./digest.js";
 import css from "./menu.css";
 
 function element(tag, className, text) {
@@ -20,7 +23,7 @@ function iconButton(icon, label) {
   return button;
 }
 
-export function mountMenu(send, userContextMenu = null, watchCallView = null) {
+export function mountMenu(send, userContextMenu = null, watchCallView = null, userTools = {}) {
   const previousFocus = () => document.activeElement;
   const root = element("div", "cm-root");
   root.id = "callmon-root";
@@ -36,17 +39,25 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   panel.setAttribute("role", "dialog");
   panel.setAttribute("aria-label", "Voice history");
   const header = element("header", "cm-header");
+  header.style.flexWrap = "wrap";
   const heading = element("h2", "", "Voice history");
+  const safety = iconButton(ShieldAlert, "Safety & Intelligence");
   const download = iconButton(Download, "Export matching activity as Markdown");
   const clear = iconButton(Trash2, "Clear history");
+  const recap = iconButton(FileText, "Call recap");
+  recap.hidden = true;
+  const watch = iconButton(Radio, "Voice Watch");
+  watch.hidden = !userTools.watch;
   const close = iconButton(X, "Close history");
-  header.append(heading, download, clear, close);
+  header.append(heading, safety, watch, recap, download, clear, close);
   const channelRow = element("div", "cm-channel");
   const channelName = element("strong", "", "Not in a voice call");
   const count = element("span", "cm-count", "0");
   channelRow.append(createElement(Volume2, { width: 18, height: 18 }), channelName,
     createElement(Users, { width: 15, height: 15 }), count);
   const session = element("div", "cm-session", "This session · 0 events");
+  const digestView = element("details", "cm-digest");
+  digestView.hidden = true;
   const callPicker = element("select", "cm-call-picker");
   callPicker.setAttribute("aria-label", "Call history");
   const searchWrap = element("div", "cm-search");
@@ -81,7 +92,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   list.setAttribute("role", "list");
   const status = element("div", "cm-status", "Connecting");
   status.setAttribute("role", "status");
-  panel.append(header, callPicker, channelRow, session, searchWrap, filters, list, status);
+  panel.append(header, callPicker, channelRow, session, digestView, searchWrap, filters, list, status);
   root.append(style, panel, launcher);
   document.body.append(root);
   let state = { channel: null, participants: {}, events: [] };
@@ -95,7 +106,15 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   let userContextActive = false;
   let userContextPending = null;
   const filterButtons = new Map();
-  const copyTimers = new Set();
+  const callDetails = mountCallDetails(userTools);
+  const intelligence = mountIntelligenceReview({
+    reset: context => send(JSON.stringify({ kind: "reset_intelligence", ...context })),
+    checkDiagnostics: context => send(JSON.stringify({ kind: "diagnostics_check", ...context })),
+    startAcoustic: context => send(JSON.stringify({ kind: "acoustic_start", ...context })),
+    stopAcoustic: context => send(JSON.stringify({ kind: "acoustic_stop", ...context })),
+  });
+  const digest = createCallDigest();
+  let digestSummary = null;
   const downloads = new Map();
 
   function selectedArchive() {
@@ -190,6 +209,17 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     const archive = selectedArchive();
     const call = archive ?? state.current_call;
     const historyEvents = viewedEvents();
+    recap.hidden = !(call?.channel.kind === 3 && call.recap && call.ended_at != null);
+    digestView.hidden = Boolean(archive) || !digestSummary || !(
+      digestSummary.arrivals.length || digestSummary.departures.length || digestSummary.returns.length || digestSummary.unavailable);
+    digestView.replaceChildren();
+    if (!digestView.hidden) {
+      digestView.append(element("summary", "", `Since last checked: ${digestSummary.arrivals.length} arrivals, ${digestSummary.departures.length} departures, ${digestSummary.returns.length} probable reconnects`));
+      for (const [label, events] of [["Arrived", digestSummary.arrivals], ["Left", digestSummary.departures], ["Returned", digestSummary.returns]]) {
+        for (const event of events) digestView.append(element("div", "", `${label}: ${event.user.display_name} (@${event.user.username})`));
+      }
+      if (digestSummary.unavailable) digestView.append(element("div", "", `${digestSummary.unavailable} unseen events are no longer retained`));
+    }
     callPicker.replaceChildren();
     const current = element("option", "", state.channel ? "Current call" : "Last call");
     current.value = "";
@@ -229,40 +259,15 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
       const username = element("span", "cm-username", `@${event.user.username}`);
       const action = element("div", "cm-action");
       action.append(createElement(event.action === "joined" ? ArrowDownLeft : ArrowUpRight, { width: 13, height: 13 }),
-        element("span", "", `${event.action === "joined" ? "Joined" : "Left"} · ${event.channel.name}`));
+        element("span", "", `${event.reconnect_of != null ? "Probable reconnect" : event.action === "joined" ? "Joined" : "Left"} · ${event.channel.name}`));
       details.append(name, username, action);
       const metadata = element("div", "cm-meta");
       const time = element("time", "", new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       time.dateTime = new Date(event.timestamp).toISOString();
       time.title = new Date(event.timestamp).toLocaleString();
-      const copy = iconButton(Copy, `Copy user ID for ${event.user.username}`);
+      const copy = iconButton(Info, `Explain event for ${event.user.username}`);
       copy.dataset.copyId = String(event.sequence);
-      copy.addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText(event.user.id);
-          copy.replaceChildren(createElement(Check, { width: 18, height: 18 }));
-          copy.title = "Copied";
-          copy.setAttribute("aria-label", "User ID copied");
-          status.textContent = "User ID copied";
-          const timer = setTimeout(() => {
-            copyTimers.delete(timer);
-            copy.replaceChildren(createElement(Copy, { width: 18, height: 18 }));
-            copy.title = `Copy user ID for ${event.user.username}`;
-            copy.setAttribute("aria-label", copy.title);
-            refreshStatus();
-          }, 1800);
-          copyTimers.add(timer);
-        } catch {
-          status.textContent = "Clipboard unavailable";
-          const fallback = element("input", "cm-copy-fallback");
-          fallback.value = event.user.id;
-          fallback.readOnly = true;
-          fallback.setAttribute("aria-label", "User ID");
-          metadata.append(fallback);
-          fallback.focus();
-          fallback.select();
-        }
-      });
+      copy.addEventListener("click", () => callDetails.event(event, call, historyEvents));
       const tools = element("div", "cm-event-tools");
       tools.append(copy);
       metadata.append(time, tools);
@@ -288,12 +293,13 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   }
 
   function open(value) {
+    if (value && panel.hidden && selectedArchiveId === null) digestSummary = digest.read();
     if (value) restoreFocus = previousFocus();
     panel.hidden = !value;
     launcher.setAttribute("aria-expanded", String(value));
     resetClear();
     openUserPicker(false);
-    if (value) search.focus();
+    if (value) { render(); search.focus(); }
     else if (restoreFocus?.isConnected) restoreFocus.focus();
   }
 
@@ -312,12 +318,16 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
 
   callPicker.addEventListener("change", () => {
     selectedArchiveId = callPicker.value || null;
+    if (selectedArchiveId === null) digestSummary = digest.read();
     selectedUsers = null;
     resetClear();
     openUserPicker(false);
     render();
   });
   userFilter.addEventListener("click", () => openUserPicker(userMenu.hidden));
+  recap.addEventListener("click", () => callDetails.recap(selectedArchive() ?? state.current_call, [state.current_call, ...(state.archives || [])].filter(Boolean)));
+  watch.addEventListener("click", () => userTools.watch?.open());
+  safety.addEventListener("click", () => intelligence.open());
   userSearch.addEventListener("input", renderUsers);
   allUsers.addEventListener("change", () => {
     selectedUsers = allUsers.checked ? null : new Set();
@@ -362,6 +372,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     }
   });
   function keyboard(event) {
+    if (!root.contains(event.target) && event.target.closest?.('[data-intellicord-owned]')) return;
     if (userContextActive) {
       if (userContextPending || document.querySelector('[role="menu"]')) return;
       if (event.key === "Escape") { userContextActive = false; return; }
@@ -373,6 +384,7 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
     }
   }
   function outside(event) {
+    if (!root.contains(event.target) && event.target.closest?.('[data-intellicord-owned]')) return;
     if (userContextActive) {
       if (userContextPending) return;
       const nativeMenu = document.querySelector('[role="menu"]');
@@ -402,9 +414,13 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
   });
   render();
   return {
+    diagnostics: intelligence.diagnostics,
     update(value) {
       const newCall = value.current_call?.id !== state.current_call?.id;
+      digest.update(value, !panel.hidden && selectedArchiveId === null);
+      if (newCall) digestSummary = null;
       state = value;
+      intelligence.update(value.intelligence);
       if (newCall || selectedArchiveId && !selectedArchive()) {
         selectedArchiveId = null;
         selectedUsers = null;
@@ -420,7 +436,8 @@ export function mountMenu(send, userContextMenu = null, watchCallView = null) {
       document.removeEventListener("keydown", keyboard, true);
       document.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("resize", fitUserPicker);
-      for (const timer of copyTimers) clearTimeout(timer);
+      callDetails.dispose();
+      intelligence.dispose();
       for (const [url, timer] of downloads) { clearTimeout(timer); URL.revokeObjectURL(url); }
       stopPlacement?.();
       root.remove();

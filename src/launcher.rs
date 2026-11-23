@@ -92,7 +92,7 @@ fn record(log: &mut File, message: &str) {
     eprintln!("{message}");
 }
 
-pub async fn launch(url: Option<&str>) -> Result<()> {
+pub async fn launch(url: Option<&str>, options: super::inject_options::Options) -> Result<()> {
     let arguments = discord_arguments(url)?;
     let directory = state_directory()?;
     fs::create_dir_all(&directory)?;
@@ -109,6 +109,11 @@ pub async fn launch(url: Option<&str>) -> Result<()> {
     match lock.try_lock() {
         Ok(()) => {}
         Err(std::fs::TryLockError::WouldBlock) => {
+            if options.observation.is_some() || options.acoustic.is_some() {
+                bail!(
+                    "Intellicord already owns this Discord session; configured sensors were not started. Stop the existing launcher before retrying the explicitly acknowledged launch."
+                );
+            }
             if url.is_some() {
                 Command::new("/usr/bin/discord")
                     .args(arguments)
@@ -124,7 +129,7 @@ pub async fn launch(url: Option<&str>) -> Result<()> {
         .truncate(true)
         .write(true)
         .open(directory.join("launch.log"))?;
-    let result = run(arguments, &mut log).await;
+    let result = run(arguments, options, &mut log).await;
     if let Err(error) = &result {
         record(&mut log, &format!("Intellicord: {error:#}"));
         let _ = Command::new("notify-send")
@@ -139,7 +144,11 @@ pub async fn launch(url: Option<&str>) -> Result<()> {
     result
 }
 
-async fn run(arguments: Vec<String>, log: &mut File) -> Result<()> {
+async fn run(
+    arguments: Vec<String>,
+    options: super::inject_options::Options,
+    log: &mut File,
+) -> Result<()> {
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -205,7 +214,7 @@ async fn run(arguments: Vec<String>, log: &mut File) -> Result<()> {
             }
         }
         record(log, "Attaching Intellicord");
-        match super::inject(PORT, None).await {
+        match super::inject_configured(options.clone()).await {
             Ok(()) => return Ok(()),
             Err(error) if error.to_string().contains("Discord reloaded") => {
                 record(

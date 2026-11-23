@@ -1,12 +1,8 @@
-import { CONTENT_PREFERENCE, readContentPreference, writeContentPreference } from "./preferences.js";
+import { SURFACE_PREFERENCES, readContentPreference, writeContentPreference } from "./preferences.js";
 import css from "./sponsored.css";
 
 export function mountSponsoredContent(adapter, storage) {
-  const preference = readContentPreference(storage);
-  let disabled = preference.disabled;
-  let error = preference.error;
   let disposed = false;
-  let saving = false;
   const style = document.createElement("style");
   style.dataset.intellicordOwned = "";
   style.textContent = css;
@@ -14,115 +10,161 @@ export function mountSponsoredContent(adapter, storage) {
   const control = document.createElement("div");
   control.dataset.intellicordOwned = "";
   control.className = "ic-content-setting";
-  const label = document.createElement("label");
-  label.className = "ic-content-label";
-  const text = document.createElement("span");
-  const title = document.createElement("strong");
-  title.textContent = "Disable Quests and Sponsored Content";
-  const scope = document.createElement("span");
-  scope.className = "ic-content-scope";
-  scope.textContent = "Intellicord · This client only";
-  const input = document.createElement("input");
-  input.type = "checkbox";
-  input.setAttribute("role", "switch");
-  input.setAttribute("aria-label", title.textContent);
-  text.append(title, scope);
-  label.append(text, input);
-  const status = document.createElement("div");
-  status.className = "ic-content-status";
-  status.setAttribute("role", "status");
-  control.append(label, status);
-  const hidden = new Set();
+  const titles = {
+    sponsored: "Disable Quests and Sponsored Content",
+    promotions: "Disable Promotional Banners",
+    shop: "Disable Shop Entry Points",
+    decorations: "Disable Decorative Prompts",
+  };
+  const surfaces = Object.entries(SURFACE_PREFERENCES).map(([key, storageKey]) => {
+    const preference = readContentPreference(storage, storageKey);
+    const row = document.createElement("div");
+    row.className = "ic-content-row";
+    row.dataset.surface = key;
+    const label = document.createElement("label");
+    label.className = "ic-content-label";
+    const text = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = titles[key];
+    const scope = document.createElement("span");
+    scope.className = "ic-content-scope";
+    scope.textContent = "Intellicord · This client only";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.setAttribute("role", "switch");
+    input.setAttribute("aria-label", title.textContent);
+    text.append(title, scope);
+    label.append(text, input);
+    const status = document.createElement("div");
+    status.className = "ic-content-status";
+    status.setAttribute("role", "status");
+    row.append(label, status);
+    control.append(row);
+    return { key, storageKey, input, status, disabled: preference.disabled, error: preference.error, saving: false, available: false, availabilityError: null };
+  });
+  const attribute = "data-intellicord-content-hidden";
+  const hidden = new Map();
+
+  function restore(node, original) {
+    if (original === null) node.removeAttribute(attribute);
+    else node.setAttribute(attribute, original);
+  }
+
+  function cleanup() {
+    for (const [node, original] of hidden) restore(node, original);
+    hidden.clear();
+    control.remove();
+    style.remove();
+  }
 
   function refresh() {
     if (disposed) return;
     const section = adapter.section();
     if (section && control.parentElement !== section) section.prepend(control);
     if (!section) control.remove();
-    input.checked = disabled;
-    input.disabled = saving || storage?.ready === false;
-    status.textContent = error || (storage?.ready === false ? "Loading Intellicord preferences" : saving ? "Saving preference" : "");
-    status.hidden = !status.textContent;
-    if (!disabled) {
-      for (const node of hidden) node.removeAttribute("data-intellicord-content-hidden");
-      hidden.clear();
-      return;
+    const candidates = new Set();
+    for (const surface of surfaces) {
+      let nodes = [];
+      try {
+        const result = surface.key === "sponsored" ? adapter.nodes() : adapter.surfaceNodes?.(surface.key);
+        surface.available = result != null;
+        surface.availabilityError = surface.available ? null : "Unavailable on this client build";
+        nodes = Array.from(result ?? []).filter(node => node?.isConnected && typeof node.setAttribute === "function"
+          && !node.contains(control) && !control.contains(node) && node !== style && !adapter.isProtected?.(node));
+      } catch (cause) {
+        surface.available = false;
+        surface.availabilityError = cause?.message || "Surface detection unavailable";
+      }
+      surface.input.checked = surface.disabled;
+      surface.input.disabled = !surface.available || surface.saving || storage?.ready === false;
+      surface.status.textContent = surface.error || surface.availabilityError || (storage?.ready === false ? "Loading Intellicord preferences" : surface.saving ? "Saving preference" : "");
+      surface.status.hidden = !surface.status.textContent;
+      if (surface.available && surface.disabled) for (const node of nodes) candidates.add(node);
     }
-    const candidates = new Set(adapter.nodes());
-    for (const node of hidden) {
+    for (const [node, original] of hidden) {
       if (!node.isConnected || !candidates.has(node)) {
-        node.removeAttribute("data-intellicord-content-hidden");
+        restore(node, original);
         hidden.delete(node);
       }
     }
     for (const node of candidates) {
       if (!hidden.has(node)) {
-        node.setAttribute("data-intellicord-content-hidden", "");
-        hidden.add(node);
+        hidden.set(node, node.getAttribute(attribute));
+        node.setAttribute(attribute, "");
       }
     }
   }
 
-  input.addEventListener("change", () => {
-    const nextValue = input.checked;
-    const success = () => {
-      if (disposed) return;
-      disabled = nextValue;
-      saving = false;
-      error = null;
-      refresh();
-    };
-    const failure = cause => {
-      if (disposed) return;
-      saving = false;
-      error = cause?.message || "Unable to save preference; setting unchanged";
-      refresh();
-    };
-    try {
-      const result = writeContentPreference(storage, nextValue);
-      if (result?.then) {
-        saving = true;
-        error = null;
+  for (const surface of surfaces) {
+    surface.input.addEventListener("change", () => {
+      if (disposed || surface.saving || !surface.available || storage?.ready === false) { refresh(); return; }
+      const nextValue = surface.input.checked;
+      const success = () => {
+        if (disposed) return;
+        surface.disabled = nextValue;
+        surface.saving = false;
+        surface.error = null;
         refresh();
-        result.then(success, failure);
-      } else success();
-    } catch { failure(new Error("Unable to save preference; setting unchanged")); }
-  });
-  const unsubscribe = storage?.subscribe?.(value => {
+      };
+      const failure = cause => {
+        if (disposed) return;
+        surface.saving = false;
+        surface.error = cause?.message || "Unable to save preference; setting unchanged";
+        refresh();
+      };
+      try {
+        const result = writeContentPreference(storage, nextValue, surface.storageKey);
+        if (result?.then) {
+          surface.saving = true;
+          surface.error = null;
+          refresh();
+          result.then(success, failure);
+        } else success();
+      } catch { failure(new Error("Unable to save preference; setting unchanged")); }
+    });
+  }
+  const unsubscribe = storage?.subscribe?.((value, request) => {
     if (disposed) return;
-    disabled = value.disabled;
-    error = value.error;
+    for (const surface of surfaces) {
+      surface.disabled = value[surface.key === "sponsored" ? "disabled" : surface.key] === true;
+      if (!request?.key || request.key === surface.key) surface.error = request?.error ?? value.error;
+    }
     refresh();
   });
   function sync(event) {
-    if (event.key !== CONTENT_PREFERENCE) return;
-    const value = readContentPreference(storage);
-    disabled = value.disabled;
-    error = value.error;
+    const affected = surfaces.filter(surface => event.key === null || event.key === surface.storageKey);
+    if (!affected.length) return;
+    for (const surface of affected) {
+      const value = readContentPreference(storage, surface.storageKey);
+      surface.disabled = value.disabled;
+      surface.error = value.error;
+    }
     refresh();
   }
   window.addEventListener("storage", sync);
   let stop;
-  try { stop = adapter.observe(refresh); }
+  try { refresh(); stop = adapter.observe(refresh); }
   catch (cause) {
     unsubscribe?.();
     window.removeEventListener("storage", sync);
-    for (const node of hidden) node.removeAttribute("data-intellicord-content-hidden");
-    control.remove();
-    style.remove();
+    cleanup();
     throw cause;
   }
   return {
-    get disabled() { return disabled; },
+    get disabled() { return surfaces[0].disabled; },
+    get states() {
+      return Object.fromEntries(surfaces.map(surface => [surface.key, {
+        disabled: surface.disabled, available: surface.available, loading: storage?.ready === false,
+        saving: surface.saving, error: surface.error || surface.availabilityError,
+      }]));
+    },
     dispose() {
+      if (disposed) return;
       disposed = true;
       unsubscribe?.();
       stop();
       window.removeEventListener("storage", sync);
-      for (const node of hidden) node.removeAttribute("data-intellicord-content-hidden");
-      hidden.clear();
-      control.remove();
-      style.remove();
+      cleanup();
     },
   };
 }

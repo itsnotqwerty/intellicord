@@ -1,5 +1,6 @@
 [data-intellicord-content-hidden] { display: none !important; }
 .ic-content-setting { font-family: var(--font-primary, "gg sans", "Noto Sans", sans-serif); color: var(--text-normal, #dbdee1); font-size: 14px; letter-spacing: 0; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--background-modifier-accent, #3f4147); }
+.ic-content-row + .ic-content-row { margin-top: 16px; }
 .ic-content-label { display: flex; align-items: center; justify-content: space-between; gap: 20px; cursor: pointer; }
 .ic-content-label > span { min-width: 0; }
 .ic-content-label strong { display: block; font-size: 16px; font-weight: 500; line-height: 24px; overflow-wrap: anywhere; }
@@ -9,4 +10,5 @@
 .ic-content-label input:checked { background: var(--text-positive, #3ba55c); }
 .ic-content-label input:checked::after { left: 19px; }
 .ic-content-label input:focus-visible { outline: 2px solid var(--brand-500, #5865f2); outline-offset: 3px; }
+.ic-content-label input:disabled { cursor: default; opacity: 0.5; }
 .ic-content-status { margin-top: 8px; color: var(--text-danger, #f23f43); font-size: 12px; }

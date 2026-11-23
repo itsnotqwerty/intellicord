@@ -1,0 +1,59 @@
+[
+  {
+    "name": "five baseline participants are not arrivals",
+    "expected_rules": [],
+    "expected_transitions": 0,
+    "steps": [
+      { "elapsed_ms": 0, "ids": ["9007199254740993", "2", "3", "4", "5"] },
+      { "elapsed_ms": 5000, "ids": ["9007199254740993", "2", "3", "4", "5"] }
+    ]
+  },
+  {
+    "name": "joins spaced more than ten seconds apart with reconciliation heartbeats",
+    "expected_rules": [],
+    "expected_transitions": 5,
+    "steps": [
+      { "elapsed_ms": 0, "ids": [] },
+      { "elapsed_ms": 1, "ids": ["9007199254740993"] },
+      { "elapsed_ms": 5001, "ids": ["9007199254740993"] },
+      { "elapsed_ms": 10001, "ids": ["9007199254740993"] },
+      { "elapsed_ms": 11002, "ids": ["9007199254740993", "2"] },
+      { "elapsed_ms": 16002, "ids": ["9007199254740993", "2"] },
+      { "elapsed_ms": 21002, "ids": ["9007199254740993", "2"] },
+      { "elapsed_ms": 22003, "ids": ["9007199254740993", "2", "3"] },
+      { "elapsed_ms": 27003, "ids": ["9007199254740993", "2", "3"] },
+      { "elapsed_ms": 32003, "ids": ["9007199254740993", "2", "3"] },
+      { "elapsed_ms": 33004, "ids": ["9007199254740993", "2", "3", "4"] },
+      { "elapsed_ms": 38004, "ids": ["9007199254740993", "2", "3", "4"] },
+      { "elapsed_ms": 43004, "ids": ["9007199254740993", "2", "3", "4"] },
+      { "elapsed_ms": 44005, "ids": ["9007199254740993", "2", "3", "4", "5"] }
+    ]
+  },
+  {
+    "name": "five distinct arrivals trigger a join burst",
+    "expected_rules": ["join_burst"],
+    "expected_transitions": 5,
+    "steps": [
+      { "elapsed_ms": 0, "ids": [] },
+      { "elapsed_ms": 1000, "ids": ["9007199254740993"] },
+      { "elapsed_ms": 2000, "ids": ["9007199254740993", "2"] },
+      { "elapsed_ms": 3000, "ids": ["9007199254740993", "2", "3"] },
+      { "elapsed_ms": 4000, "ids": ["9007199254740993", "2", "3", "4"] },
+      { "elapsed_ms": 5000, "ids": ["9007199254740993", "2", "3", "4", "5"] }
+    ]
+  },
+  {
+    "name": "three leave return pairs trigger rapid reentry",
+    "expected_rules": ["rapid_reentry"],
+    "expected_transitions": 6,
+    "steps": [
+      { "elapsed_ms": 0, "ids": ["9007199254740993"] },
+      { "elapsed_ms": 1000, "ids": [] },
+      { "elapsed_ms": 2000, "ids": ["9007199254740993"] },
+      { "elapsed_ms": 3000, "ids": [] },
+      { "elapsed_ms": 4000, "ids": ["9007199254740993"] },
+      { "elapsed_ms": 5000, "ids": [] },
+      { "elapsed_ms": 6000, "ids": ["9007199254740993"] }
+    ]
+  }
+]

@@ -3,12 +3,69 @@ name = "intellicord"
 version = "0.1.0"
 edition = "2024"
 description = "Opt-in Discord enhancements with Callmon voice-call history"
+default-run = "intellicord"
+
+[profile.dev]
+codegen-units = 1
+incremental = false
+
+[[bin]]
+name = "intellicord-acoustic"
+path = "src/acoustic_cli.rs"
+
+[[bin]]
+name = "intellicord-observe"
+path = "src/observe_cli.rs"
+required-features = ["observe"]
+
+[[bin]]
+name = "intellicord-bpf-helper"
+path = "src/bpf_helper.rs"
+required-features = ["observe"]
+
+[features]
+observe = ["dep:aya", "dep:aya-obj", "dep:object", "dep:libc", "dep:getrandom", "dep:caps"]
+
+[[example]]
+name = "evaluate_voice"
+test = true
+
+[[example]]
+name = "benchmark_acoustic"
+test = true
+
+[[example]]
+name = "evaluate_acoustic"
+test = true
+
+[[example]]
+name = "replay_acoustic_lifecycle"
+test = true
+
+[[example]]
+name = "replay_timed_acoustic_lifecycle"
+test = true
+
+[dev-dependencies]
+hound = "3.5"
+libc = "0.2"
+object = { version = "0.36.7", default-features = false, features = ["write", "elf", "std"] }
 
 [dependencies]
+intellicord-observe-common = { path = "crates/intellicord-observe-common" }
 anyhow = "1"
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+rustfft = "6.4"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "io-util", "net"] }
+serde_json = { version = "1", features = ["raw_value"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "sync", "io-util", "io-std", "net", "process"] }
 tokio-tungstenite = "0.28"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+getrandom = { version = "0.3", optional = true }
+aya = { version = "0.13.1", optional = true }
+aya-obj = { version = "0.2.1", optional = true }
+object = { version = "0.36.7", default-features = false, features = ["read", "elf", "std"], optional = true }
+libc = { version = "0.2", optional = true }
+caps = { version = "0.5", optional = true }

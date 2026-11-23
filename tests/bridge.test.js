@@ -224,6 +224,22 @@ test("local mute refuses self, absent users, and missing identity or APIs", () =
   assert.equal(createLocalMute(fixture().stores), null);
 });
 
+test("snapshots preserve channel kinds without inferring group calls from participants", () => {
+  const context = fixture();
+  const messages = [];
+  let kind = 3;
+  context.stores.channels.getChannel = id => ({ id, name: "Private group", type: kind });
+  const stop = observeCall(context.stores, payload => messages.push(JSON.parse(payload)), () => {});
+  try {
+    assert.equal(messages.at(-1).channel.kind, 3);
+    for (const value of [1, 2, undefined, "3", -1, 256]) {
+      kind = value;
+      for (const listener of context.listeners) listener();
+      assert.equal(messages.at(-1).channel.kind, Number.isInteger(value) && value >= 0 && value <= 255 ? value : null);
+    }
+  } finally { stop(); }
+});
+
 test("snapshots keep exact IDs, suppress duplicates, follow current call, and detach", () => {
   const fixtureData = fixture();
   const messages = [];
@@ -258,4 +274,48 @@ test("malformed or unresolved participants pause capture without false leave sna
     assert.equal(messages.length, 1);
     assert.match(errors.at(-1), /not yet available/);
   } finally { stop(); }
+});
+
+test("capture provenance distinguishes idle reconciliation and recovery without inventing transitions", () => {
+  const context = fixture();
+  const messages = [];
+  const original = { setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval,
+    performance: Object.getOwnPropertyDescriptor(globalThis, "performance") };
+  let elapsed = 0;
+  let poll;
+  let cleared = false;
+  globalThis.setInterval = callback => { poll = callback; return 123; };
+  globalThis.clearInterval = handle => { assert.equal(handle, 123); cleared = true; };
+  Object.defineProperty(globalThis, "performance", { configurable: true, value: { now: () => elapsed } });
+  let stop;
+  try {
+    stop = observeCall(context.stores, payload => messages.push(JSON.parse(payload)), () => {});
+    assert.equal(messages[0].observation_source, "initial_snapshot");
+    assert.equal(messages[0].capture_gap, false);
+    elapsed = 1000;
+    poll();
+    assert.equal(messages.length, 1);
+    elapsed = 2000;
+    poll();
+    assert.equal(messages[1].observation_source, "reconciliation");
+    assert.deepEqual(messages[1].users, messages[0].users);
+    context.setStates({ invalid: { userId: 2 } });
+    for (const listener of context.listeners) listener();
+    assert.equal(messages.length, 2);
+    context.setStates({ one: { userId: "9007199254740993" } });
+    for (const listener of context.listeners) listener();
+    assert.equal(messages[2].observation_source, "store_notification");
+    assert.equal(messages[2].capture_gap, true);
+    assert.deepEqual(messages[2].users, messages[0].users);
+    elapsed = 4000;
+    poll();
+    assert.equal(messages[3].capture_gap, false);
+  } finally {
+    stop?.();
+    globalThis.setInterval = original.setInterval;
+    globalThis.clearInterval = original.clearInterval;
+    Object.defineProperty(globalThis, "performance", original.performance);
+  }
+  assert.equal(cleared, true);
+  assert.equal(context.listeners.size, 0);
 });

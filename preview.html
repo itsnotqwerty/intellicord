@@ -23,7 +23,7 @@
     .avatar { border-radius: 50%; width: 48px; height: 48px; background: #4c5c72; margin: auto; display: grid; place-items: center; font-size: 17px; }
     .person:nth-child(2) .avatar { background: #427b69; }
     .person:nth-child(3) .avatar { background: #915968; }
-    .demo-controls { padding: 24px; display: flex; justify-content: flex-end; }
+    .demo-controls { padding: 24px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
     [hidden] { display: none !important; }
     .preview-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 4px; flex-shrink: 0; }
     .preview-icon:hover { background: #404249; }
@@ -47,13 +47,16 @@
   <main data-intellicord-call-view><header class="topbar"><strong>General</strong><span class="badge">INTELLICORD / CALLMON · DEMO DATA</span><button id="preview-settings" class="preview-icon" type="button" aria-label="User Settings" title="User Settings"></button></header>
     <div id="preview-call">
     <div class="call"><div class="person"><div class="avatar">M</div>Morgan</div><div class="person"><div class="avatar">J</div>Jules</div><div class="person"><div class="avatar">A</div>Alex Chen</div></div>
-    <div class="demo-controls"><button id="simulate-join" type="button">Simulate join</button></div>
+    <div class="demo-controls"><button id="simulate-join" type="button">Toggle Riley</button><button id="simulate-reconnect" type="button">Simulate reconnect</button><button id="simulate-end" type="button">End group call</button></div>
+    <div id="demo-watch-status" role="status"></div>
+    <a id="demo-inspect-link" href="https://example.com/path?utm_source=demo&amp;keep=1">example.com</a>
     <aside class="questCard_demo" aria-label="Quest">Demo Quest</aside>
     <aside class="sponsoredCard_demo" aria-label="Sponsored Content">Demo Sponsored Content</aside>
     </div>
     <section id="preview-privacy" class="preview-privacy" hidden>
       <button id="preview-back" class="preview-icon" type="button" aria-label="Back to call" title="Back to call"></button>
       <h1>Data &amp; Privacy</h1>
+      <div class="demo-settings-tabs" role="tablist"><button type="button" role="tab" data-settings-sidebar-item="data_and_privacy_panel" aria-selected="true">Data &amp; Privacy</button></div>
       <div data-nav-anchor-key="sponsored_content_category">
         <h2>Sponsored Content</h2>
         <label class="preview-native-setting">Use my Discord activity to personalize Sponsored Content<input type="checkbox" checked></label>
